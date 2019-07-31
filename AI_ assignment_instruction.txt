@@ -1,0 +1,20 @@
+1. 인공지능 보고서 -> 인공지능 과제 코드 & 데이터 -> 인공지능 Training & Test -> 안의 모든 폴더를 
+			Visual Studio 안에 Debug 폴더로 이동
+
+2. 김상구 폴더 -> 인공지능 보고서 -> 인공지능 과제 코드 & 데이터 -> 인공지능 소스코드.txt 안에 소스코드를 복사
+
+3. Visual Studio 켜서 소스코드 붙여넣고 , 디버깅.
+
+4. 윈도우키 검색에서 CMD 치고 엔터!
+
+5. 1번에 이동시킨 Debug 폴더로 CMD창에서 진입 (보고서 참조하면 알 수 있음.)[ex. cd \documents\Visual Studio 2010 \ 											projects\ai\debug]
+
+6. CMD창에서 [프로젝트명 -t xor.tra -e xor.test] 입력 (보고서 참조하면 알 수 있음.) <- XOR 수행 테스트 하는 과제.
+
+7. CMD창에서 [프로젝트명 -t abc_8.tra -e abc_8.test -w 12] 입력				  <- 8x8 수행 테스트 하는 과제
+
+8. CMD창에서 [프로젝트명 -t abc_10.tra -e abc_10.test -w 12] 입력			  <- 10x10 수행 테스트 하는 과제
+
+9. CMD창에서 [프로젝트명 -t abc_12.tra -e abc_12.test -w 12] 입력			  <- 12x12 수행 테스트 하는 과제
+
+10. 끝!

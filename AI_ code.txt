@@ -1,0 +1,518 @@
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <math.h>
+
+/* define constant*/
+#define TRUE 1
+#define FALSE 0
+#define ON 1
+#define OFF 0
+#define ON_char '1'
+#define OFF_char '0'
+#define UNKNOWN '?'
+
+#define ETHA 0.5
+#define BETHA 0.5
+#define ALPHA 0.2
+
+#define MAX_NEURONS 101
+#define MAX_TRAIN 20
+#define DIFF_MIN 0.1  // 학습패턴출력값과 목표치의 최소 오류값
+
+#define MAX_LOOP 30000
+
+
+#define f(x) ((x<-10.0)?0.0:((x>10.0)?1:1.0/ (1.0 + exp(-x)) )) //시그모이트 함수
+//#define abs(x) ((x<0)?-x:x) <- math.h 에서 제공
+#define char(x) ((x==ON)?ON_char:((x==OFF)?OFF_char:UNKNOWN))
+#define value(x) ((x==ON_char)?ON:OFF)
+
+//#define RAND(min, max) ((rand()-16383.5)/16383.5)*(max-min)+min -> RAND convert function
+float RAND(float min, float max)
+{
+	float result = 0.0;
+	result = ((rand() - 16383.5)/16383.5) *(max-min) +min;
+	return result;
+}
+
+/* Type definition for NN structure */
+
+typedef struct
+{
+	int n_input;   // input layer neurons 수
+	int n_hidden;   // hidden layer neurons 수
+	int n_output;   // output layer neurons 수
+
+	float *i_value;
+	float h_value[MAX_NEURONS]; // 학습패턴 hidden layer 출력 값
+	float o_value[MAX_NEURONS]; // 학습패턴 output layer 출력 값
+
+	float i_to_h[MAX_NEURONS][MAX_NEURONS]; // input - hidden layer의 연결강도
+	float h_to_o[MAX_NEURONS][MAX_NEURONS]; // hidden - output layer의 연결 강도
+
+	float h_offset[MAX_NEURONS]; // hidden layer offset 값
+	float o_offset[MAX_NEURONS]; // output layer offset 값
+}NN_str;
+
+
+
+/* define temporary data struct */
+typedef struct
+{
+	float i_value[MAX_NEURONS]; // 학습할 데이터 input 값
+	float o_value[MAX_NEURONS]; // 학습할 데이터 OUTPUT(목표치)
+
+} T_str;
+
+/* define of global variable */
+NN_str nn;             // neural network
+int n_data;            // the number of data
+T_str data[MAX_TRAIN]; // training of test data
+int w_limit = 10;      // default width of echo pattern
+
+
+
+void read_training_data(char *f_name)
+{
+	int i;    // index of the neurons of input layer
+	int k;    // index of the neurons of output layer
+	int s=0;  // index of learning data
+	char ch;  // temporary variable for get char
+	FILE *fp; // input file pointer
+
+	printf("Read training data...\n");
+
+	if((fp = fopen(f_name, "r")) == NULL)
+	{
+		fprintf(stderr, "ERROR: Training data file unknown\n");
+		exit(1);
+	}
+
+	/* read and print the number of neurons of each layer
+	and the number of training data */
+	fscanf(fp, "%d %d %d\n", &nn.n_input, &nn.n_hidden, &nn.n_output);
+	fscanf(fp, "%d \n", &n_data);
+
+	printf(" The number of neurons of input layers is %d\n", nn.n_input);
+	printf(" The number of neurons of hidden layers is %d\n", nn.n_hidden);
+	printf(" The number of neurons of output layers is %d\n", nn.n_output);
+	printf(" The number of learning of data is %d\n\n", n_data);
+
+	for(s=0; s<n_data; s++)
+	{
+		// read the input value of training data
+		for(i=0; i<nn.n_input; i++)
+		{
+			while((ch = fgetc(fp)) == '\n');
+			data[s].i_value[i] = value(ch);
+		}
+		fgetc(fp);
+
+		// read the output value of training data
+		for(k=0; k<nn.n_output; k++)
+		{
+			while((ch = fgetc(fp)) == '\n');
+			data[s].o_value[k] = value(ch);
+		}
+		fscanf(fp, "\n");
+	}
+
+	for(s=0; s<n_data; s++)
+	{
+		// echo print the input value of training data
+		for(i=0; i<nn.n_input; i++)
+		{
+			if(i==0) printf("[%d]input:\n", s);
+			else if ((i%w_limit) == 0) printf("\n");
+			printf("%1c", char(data[s].i_value[i]));
+		}
+		printf("\n");
+		// echo print the input value of training data
+		for(k=0; k<nn.n_output; k++)
+		{
+			if(k==0) printf("output:");
+			else if((k%w_limit) == 0) printf("\n");
+			printf("%1c", char(data[s].o_value[k]));
+		}
+		printf("\n");
+	}
+
+	printf("\n");
+}
+
+
+void weight_initialize()
+{
+	int i; // index of the neurons of input layer
+	int j; // index of the neurons of hidden layer
+	int k; // index of the neurons of output layer
+
+	printf("Initialize weight value...\n\n");
+
+	/* set the weights between input and hidden layer by small random value */
+	for(i=0; i<nn.n_input; i++)
+		for(j=0; j<nn.n_hidden; j++)
+			nn.i_to_h[i][j] = RAND(-0.05,0.05);
+	/* set the weights between hidden and output layer by small random value */
+	for(j=0; j<nn.n_hidden; j++)
+		for(k=0; k<nn.n_output; k++)
+			nn.h_to_o[j][k] = RAND(-0.05,0.05);
+	/* set the offsets of hidden layer by very small random value */
+	for(j=0; j<nn.n_hidden; j++)
+		nn.h_offset[j] = RAND(-0.05,0.05);
+	/* set the offsets of output layer by very small random value */
+	for(k=0; k<nn.n_output; k++)
+		nn.o_offset[k] = RAND(-0.05,0.05);
+}
+
+
+
+void active_nn()
+{
+	int i;     // index of the neurons of input layer
+	int j;     // index of the neurons of hidden layer
+	int k;     // index of the neurons of output layer
+	float tmp; // temporary data for sum
+
+	/* compute the value of hidden layer */
+	for(j=0; j<nn.n_hidden; j++)
+	{
+		tmp = nn.h_offset[j];
+		for(i=0; i<nn.n_input; i++)
+			tmp += nn.i_to_h[i][j]*nn.i_value[i];
+		nn.h_value[j] = f(tmp);
+	}
+
+	/* compute the value of output layer */
+	for(k=0; k< nn.n_output; k++)
+	{
+		tmp = nn.o_offset[k];
+		for(j=0; j<nn.n_hidden; j++)
+			tmp += nn.h_to_o[j][k]*nn.h_value[j];
+		nn.o_value[k] = f(tmp);
+	}
+}
+
+
+void learning()
+{
+	int i;      // index of the neurons of input layer
+	int j;      // index of the neurons of hidden layer
+	int k;      // index of the neurons of outputput layer
+	int s = 0;  // index of learning data
+	int t = 0;  // the number of learning 
+	float tmp;  // temporary data for sum
+	float old;  // temporary var. for computing momentum
+	float diff; // total difference
+	float h_err[MAX_NEURONS]; // error term of hidden layer
+	float o_err[MAX_NEURONS]; // error term of output layer
+	float ih_moment[MAX_NEURONS][MAX_NEURONS]; // momentum term between input and hidden layer
+	float ho_moment[MAX_NEURONS][MAX_NEURONS]; // momentum term between hidden and output layer
+
+	printf("Learning neural network../\n");
+
+	// clear the momentum term between input and hidden layer
+	for(i=0; i<nn.n_input; i++)
+		for(j=0; j<nn.n_hidden; j++)
+			ih_moment[i][j] = 0;
+
+	// clear the momentum term between hidden and output layer
+	for(j=0; j<nn.n_hidden; j++)
+		for(k=0; k<nn.n_output; k++)
+			ho_moment[j][k] = 0;
+
+	do {
+		diff  = 0.0;
+		for(s=0; s<n_data; s++)
+		{
+			// active neural network for getting output value
+			nn.i_value = data[s].i_value;
+			active_nn();
+
+			// compute error term of output layer
+			for(k=0; k<nn.n_output; k++)
+			{
+				o_err[k] = (data[s].o_value[k]-nn.o_value[k]) * nn.o_value[k] * (1-nn.o_value[k]);
+				diff += abs((data[s].o_value[k] - nn.o_value[k]));
+			}
+
+			// compute error term of hidden layer
+			for(j=0; j<nn.n_hidden; j++)
+			{
+				h_err[j] = 0;
+				for(k=0; k<nn.n_output; k++)
+					h_err[j] += o_err[k]*nn.h_to_o[j][k] * nn.h_value[j] * (1-nn.h_value[j]);
+			}
+
+			/* reset the weights between input and hidden layer and the offsets of hidden layer */
+			for(i=0; i< nn.n_input; i++)
+				for(j=0; j<nn.n_hidden; j++)
+				{
+					old = nn.i_to_h[i][j];
+					nn.i_to_h[i][j] += ETHA * h_err[j] * data[s].i_value[i] + ALPHA * ih_moment[i][j];
+					ih_moment[i][j] =  nn.i_to_h[i][j] - old;
+					nn.h_offset[j] += BETHA * h_err[j];
+				}
+				/* reset the weights between hidden and output layer and the offsets of hidden layer */
+				for(j=0; j<nn.n_hidden; j++)
+					for(k=0; k<nn.n_output; k++)
+					{
+						old = nn.h_to_o[j][k];
+						nn.h_to_o[j][k] += ETHA * o_err[k] * nn.h_value[j] + ALPHA * ho_moment[j][k];
+						ho_moment[j][k] = nn.h_to_o[j][k] - old;
+						nn.o_offset[k] += BETHA * o_err[k];
+					}
+
+		}
+		// print out diff every T iteration
+		if((t%100) == 0)
+			printf(" [%d] diff is %f \n", t, diff);
+		t++;
+
+	} while((diff > DIFF_MIN) && (t < MAX_LOOP));
+
+	if((t%100) != 0)
+		printf(" [%d] diff is %f \n\n", t, diff);
+	else printf("\n");
+}
+
+void learn_weight(char *f_name)
+{
+	read_training_data(f_name);
+	weight_initialize();
+	learning();
+}
+
+void read_weight(char *f_name)
+{
+	int i;    // index of the neurons of input layer
+	int j;    // index of the neurons of hidden layer
+	int k;    // index of the neurons of output layer
+	FILE *fp; // input file pointer
+
+	if((fp = fopen(f_name, "r")) == NULL)
+	{
+		printf("Error : The trained weight file open error!!!\n");
+		exit(1);
+	}
+
+	printf("Read trained weight file...\n");
+	// read and write the number of neurons of each layer
+	fscanf(fp, "%d %d %d\n", &nn.n_input, &nn.n_hidden, &nn.n_output);
+	printf("The number of neurons of input layer is %d \n", nn.n_input);
+	printf("The number of neurons of hidden layer is %d \n", nn.n_hidden);
+	printf("The number of neurons of output layer is %d \n", nn.n_output);
+
+	// read and set the weights between input and hidden layer
+	for(i=0; i<nn.n_input; i++)
+		for(j=0; j<nn.n_hidden; j++)
+			fscanf(fp, "%f\n", &nn.i_to_h[i][j]);
+
+	// read and set the weights between hidden and output layer
+	for(j=0; j<nn.n_hidden; j++)
+		for(k=0; k<nn.n_output; k++)
+			fscanf(fp, "%f\n", &nn.h_to_o[j][k]);
+
+	// read and set the offsets of hidden layer
+	for(j=0; j<nn.n_hidden; j++)
+		fscanf(fp, "%f\n", &nn.h_offset[j]);
+	// read and set the offsets of output layer
+	for(k=0; k<nn.n_output; k++)
+		fscanf(fp, "%f\n", &nn.o_offset[k]);
+
+	fclose(fp);
+}
+
+void write_weight(char *f_name)
+{
+	int i;    // index of the neurons of input layer
+	int j;    // index of the neurons of hidden layer
+	int k;    // index of the neurons of output layer
+	FILE *fp; // output file pointer
+
+	if((fp = fopen(f_name, "w")) == NULL)
+	{
+		printf("ERROR: File creation error !!!\n");
+		exit(1);
+	}
+
+	printf("Write trained weight and offset..\n");
+
+	// write the number of neurons of each layer
+	fprintf(fp, "%d %d %d\n",nn.n_input, nn.n_hidden, nn.n_output);
+
+	// write the weights between input and hidden layer
+	for(i=0; i<nn.n_input; i++)
+		for(j=0; j<nn.n_hidden; j++)
+			fprintf(fp, "%f\n", nn.i_to_h[i][j]);
+	// write the weights between hidden and output layer
+	for(j=0; j<nn.n_hidden; j++)
+		for(k=0; k<nn.n_output; k++)
+			fprintf(fp, "%f\n", nn.h_to_o[j][k]);
+	// write the offsets of hidden layer
+	for(j=0; j<nn.n_hidden; j++)
+		fprintf(fp, "%f\n", nn.h_offset[j]);
+	// write the offsets of output layer
+	for(k=0; k<nn.n_output; k++)
+		fprintf(fp, "%f\n", nn.o_offset[k]);
+
+	fclose(fp);
+}
+
+void read_test_data(char *f_name)
+
+{
+	int i;    // index of the neurons of input layer
+	int s=0;  // index of test data 
+	char ch;  // temporary variable for get char
+	FILE *fp; // input file pointer
+
+	if((fp = fopen(f_name, "r")) == NULL)
+	{
+		fprintf(stderr, "ERROR: Testing file unknown\n");
+		exit(1);
+	}
+
+	printf("Read test data...\n");
+
+	// read the number of test data and the value of input layer of each data
+	fscanf(fp, "%d\n", &n_data);
+	printf("The number of test data  is %d\n\n", n_data);
+
+	for(s=0; s< n_data; s++)
+	{
+		for(i=0; i<nn.n_input; i++)
+		{
+
+			while((ch = fgetc(fp)) == '\n');
+			data[s].i_value[i] = value(ch);
+		}
+		fgetc(fp);
+	}
+}
+
+void testing()
+{
+	int i;     // index of the neurons of input layer
+	//int j;     // index of the neurons of hidden layer
+	int k;     // index of the neurons of output layer
+	int s=0;   // index of learning data
+	//float tmp; // temprary variable for sum
+
+	printf("Testing...\n\n");
+
+	for(s=0; s<n_data; s++)
+	{
+		// active neural network for getting output value
+		nn.i_value = data[s].i_value;
+		active_nn();
+
+		// print input and output value
+		for(i=0; i<nn.n_input; i++)
+		{
+			if(i==0) printf("[%d] input:\n", s);
+			else if( (i%w_limit) == 0) printf("\n");
+			printf("%1c", char(data[s].i_value[i]));
+		}
+		printf("\n");
+		for(k=0; k<nn.n_output; k++)
+		{
+			if(k==0) printf("output: ");
+			else if ((k%w_limit) == 0) printf("\n");
+			printf("%5.4f ", nn.o_value[k]);
+		}
+		printf("\n");
+	}
+}
+
+void test(char *f_name)
+{
+	read_test_data(f_name);
+	testing();
+}
+
+void usage()
+{
+	printf("usage: bp [-t <train_file> | -r<learned_weight\n");
+	printf("  {-s<new_learned+weight_file>}--for save weight\n");
+	printf("  {-e<test_data_file>}--for test\n");
+	printf("  {-w<num>}--for echo print\n");
+	exit(1);
+}
+
+void none_fun(char *f_name)
+{
+
+}
+
+void (*set_weight)(char *);
+void (*show_weight)(char *);
+void (*test_data)(char *);
+
+#define def_set_weight(x)   set_weight = x;
+#define def_show_weight(x)  show_weight = x;
+#define def_test_data(x)    test_data =x;
+
+void main(int argc, char *argv[])
+{
+	int i;
+	char *if_name = NULL;
+	char *of_name = NULL;
+	char *tf_name = NULL;
+
+	/* 
+	check argument and
+	set requested function to actual function
+	*/
+
+	if(argc < 3) usage();
+
+	def_show_weight(none_fun);
+	def_test_data(none_fun);
+	i=1;
+
+	while(i<argc)
+	{
+		if(argv[i][0] == '-') 
+		{
+			switch(argv[i][1])
+			{
+			case 't': // training data 
+				def_set_weight(learn_weight);
+				i++;
+				if_name = argv[i];
+				break;
+			case 'r': // read weight
+				def_set_weight(read_weight);
+				i++;
+				if_name = argv[i];
+				break;
+			case 's': // save weight
+				def_show_weight(write_weight);
+				i++;
+				of_name = argv[i];
+				break;
+			case 'e': // test data
+				def_test_data(test);
+				i++;
+				tf_name = argv[i];
+				break;
+			case 'w': // width parameter
+				i++;
+				w_limit = atoi(argv[i]);
+				break;
+			default: usage();
+			}
+		}
+		else usage();
+		i++;
+	}
+
+	srand(5);
+	set_weight(if_name);
+	show_weight(of_name);
+	test_data(tf_name);
+}
+
